@@ -25,14 +25,14 @@ end
 --either no time has passed since last req, or it the diff btwn now and last time refiled
 local timeElapsed = math.max(0, now-last)
 --just the formula for token refil
-tokens = math.min(capacity, tokens+timeElapsed * refillRate)
+tokens = math.min(capacity, tokens + timeElapsed * refillRate)
 
-if tokens<tokenCost then 
-    redis.call("HMSET", KEYS[1], "tokens", tokens, "last", now)
+local allowed = 0
+if tokens >= tokenCost then
+    tokens = tokens - tokenCost
+    allowed = 1
 end
-
-tokens = tokens - tokenCost
 redis.call("HMSET", KEYS[1], "tokens", tokens, "last", now)
 redis.call("EXPIRE", KEYS[1], math.ceil(capacity/refillRate))
 
-return 1
+return allowed
