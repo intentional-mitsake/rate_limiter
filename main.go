@@ -2,15 +2,18 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
+	"fmt"
+
 	"github.com/intentional-mitsake/rate_limiter/pkg/limiter"
+	"github.com/intentional-mitsake/rate_limiter/pkg/utils"
 	"github.com/redis/go-redis/v9"
 )
 
 func main() {
+	logger := utils.CreateLogger()
 	rdb := redis.NewClient(&redis.Options{
 		Addr: "localhost:6379",
 	})
@@ -34,84 +37,63 @@ func main() {
 	for i := 0; i < int(capacity); i++ {
 		allowed, err := bucket.ReqLimiter(ctx, key1)
 		if err != nil {
-			fmt.Println("Error:", err)
+			logger.Error(err.Error())
 		}
 		if !allowed {
-			fmt.Printf("Expected request %d to be allowed for %s\n", i+1, key1)
+			logger.Warning("Expected request beyond capacity for " + key1)
 		}
 	}
 
 	// MULTI-USER BLOCK TEST
-	//.ie. if one user has hit their max cap, another user shouldnt be blocked
 	for i := 0; i < int(capacity); i++ {
 		allowed, err := bucket.ReqLimiter(ctx, key2)
 		if err != nil {
-			fmt.Println("Error:", err)
+			logger.Error(err.Error())
 		}
 		if !allowed {
-			fmt.Printf("Expected request %d to be allowed for %s\n", i+1, key2)
+			logger.Warning("Expected request beyond capacity for " + key2)
 		}
 	}
 
 	// BLOCK AFTER LIMIT REACHED TEST
 	allowed, _ := bucket.ReqLimiter(ctx, key2)
 	if allowed {
-		fmt.Printf("Expected request beyond capacity to be blocked for %s\n", key2)
+		logger.Warning("Expected request beyond capacity to be blocked for " + key2)
 	}
 
 	// REFILL AFTER SLEEP TEST
 	time.Sleep(1 * time.Second) // allow refill
 	allowed, _ = bucket.ReqLimiter(ctx, key1)
 	if allowed {
-		fmt.Printf("Request allowed after sleep for %s (refill works)\n", key1)
+		logger.Info("Request allowed after sleep for " + key1 + " (refill works)")
 	}
 
-	//CONCURRENT REQUESTS TEST
-	//chatgpteed this one but in hindsight looks simple enough
-	users := []string{"user:1", "user:2"} //two new users
+	// CONCURRENT REQUESTS TEST
+	users := []string{"user:1", "user:2"} // two new users
 	requestsPerUser := 12                 // trying more than capacity
-	var wg sync.WaitGroup                 //counter to help wait to goroutines to finish before continkuing
-	//incr for each goroutine added, decr for each finish, wiat till zero
+	var wg sync.WaitGroup                 // counter to help wait for goroutines to finish
 
 	for _, u := range users {
 		rdb.Del(context.Background(), u)
 	}
 
-	fmt.Println("Starting concurrent requests...")
+	logger.Info("Starting concurrent requests...")
 
 	for _, user := range users {
-		//going for more than 10(max cap) to see perfomance
 		for i := 1; i <= requestsPerUser; i++ {
-			wg.Add(1) //incremnet the counter by one for new goroutine launched
-			//goroutine definition-->takes the reqnum and the users name/id
-			//this loop wont be waiting till this func is done,
-			//this func will start with the reqNum of this iteration and move on to next iteration
-			//without waitng for this iteratioins func to end execution
-			//pretty much async/await
-			//multi goroutines run parallel simulating concurrent requests
+			wg.Add(1)
 			go func(u string, reqNum int) {
-				defer wg.Done() //decrement the counter after this go routine is done
+				defer wg.Done()
 				allowed, err := bucket.ReqLimiter(context.Background(), u)
 				if err != nil {
-					fmt.Printf("[%s] Request %d error: %v\n", u, reqNum, err)
+					fmt.Printf("[%s] Request %d allowed? %s\n", user, reqNum, err.Error())
 					return
 				}
-				fmt.Printf("[%s] Request %2d allowed? %v\n", u, reqNum, allowed)
-			}(user, i) //schedules teh anon goroutine immediately to run concurently using current user and i(reqnum) as parameters
+				fmt.Printf("[%s] Request %d allowed? %v\n", user, reqNum, allowed)
+			}(user, i)
 		}
-		//at the end whats basically happening in thsi nested loop is:
-		//the first loop goes over the tow users, second one runs for each user
-		//in the second loop for ech user, all their respective requests are added to the wait group
-		//and lauched immediately---THIS DOESNT MEAN ITS EXECUTEED IMMEDIATELY--
-		//cuz the loop doesnt wait to execute each req before moving on to next
-		//all it does is :
-		//add to wg, schedules teh goroutine,(NO WAIT FOR GOROUTINE TO EXECUTE) moves to next itertinl
-		//this way all req are added to the wg and scheduled pretyy much immediately
-		//a scheduler decides when to run each goroutine
 	}
 
-	// Wait for all goroutines to finish
 	wg.Wait()
-
-	fmt.Println("Concurrent test finished")
+	logger.Info("Concurrent test finished")
 }

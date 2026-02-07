@@ -32,7 +32,10 @@ if tokens >= tokenCost then
     tokens = tokens - tokenCost
     allowed = 1
 end
+--setting new values for tokens and last refil time
 redis.call("HMSET", KEYS[1], "tokens", tokens, "last", now)
+--expire the tokens if their life cylcle is done
+--if 100 max cap, and 5 seconds per refil, then life of a token = 100/5 = 20 seconds
 redis.call("EXPIRE", KEYS[1], math.ceil(capacity/refillRate))
 
 return allowed
