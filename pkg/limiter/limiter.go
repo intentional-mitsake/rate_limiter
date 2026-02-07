@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	_ "embed"
+
 	"github.com/redis/go-redis/v9"
 )
 
@@ -23,10 +25,13 @@ type RedisBucket struct {
 	rate float64
 }
 
+//go:embed script.lua
+var luascript string
+
 func CreateRedisBucket(rdb *redis.Client, cap, rate float64) *RedisBucket {
 	return &RedisBucket{
 		rdb:    rdb,
-		script: redis.NewScript("script.lua"),
+		script: redis.NewScript(luascript),
 		cap:    cap,
 		rate:   rate,
 	}
@@ -38,8 +43,10 @@ func (b *RedisBucket) ReqLimiter(ctx context.Context, key string) (bool, error) 
 	//ctx is the controller, client(rdb here) is smth that can send a comand to redis and return the result
 	//rdb inside the run just tells which rdb connection to use, access to fommadns like (HMGET)
 	res, err := b.script.Run(
-		ctx,           //bascially a cancellation and timeout controler
-		b.rdb,         //which rdb to execute this on
+		ctx,   //bascially a cancellation and timeout controler
+		b.rdb, //which rdb to execute this on
+		//btw, we will be passing each users id or smth wrapping the last and tokens here
+		//meaning each key-value stored is separate for each user
 		[]string{key}, //auto recognized as a key
 		b.cap,         //from her its argv1 to argv4
 		b.rate,
