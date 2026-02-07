@@ -10,7 +10,7 @@ import (
 )
 
 type RedisBucket struct {
-	rdb *redis.Client
+	Rdb *redis.Client
 	//redis executes scripts atomically
 	//meaning all of the stuff inside the script happens at onec without interruption
 	//this is imp as prev while using in memory token bucket, we used mutex to avoid race condtisons
@@ -18,11 +18,11 @@ type RedisBucket struct {
 	//as no interuption->no race cond
 	//when is the scirpt executed tho?->when called->each request
 	//basicallt replacemnet for mutex
-	script *redis.Script
+	Script *redis.Script
 	//max cap
-	cap float64
+	Cap float64
 	//refil rate
-	rate float64
+	Rate float64
 }
 
 //go:embed script.lua
@@ -30,10 +30,10 @@ var luascript string
 
 func CreateRedisBucket(rdb *redis.Client, cap, rate float64) *RedisBucket {
 	return &RedisBucket{
-		rdb:    rdb,
-		script: redis.NewScript(luascript),
-		cap:    cap,
-		rate:   rate,
+		Rdb:    rdb,
+		Script: redis.NewScript(luascript),
+		Cap:    cap,
+		Rate:   rate,
 	}
 }
 
@@ -42,14 +42,14 @@ func (b *RedisBucket) ReqLimiter(ctx context.Context, key string) (bool, error) 
 	//this takes (context.Context, clinet cmder, keys []string, args ..interface{})
 	//ctx is the controller, client(rdb here) is smth that can send a comand to redis and return the result
 	//rdb inside the run just tells which rdb connection to use, access to fommadns like (HMGET)
-	res, err := b.script.Run(
+	res, err := b.Script.Run(
 		ctx,   //bascially a cancellation and timeout controler
-		b.rdb, //which rdb to execute this on
+		b.Rdb, //which rdb to execute this on
 		//btw, we will be passing each users id or smth wrapping the last and tokens here
 		//meaning each key-value stored is separate for each user
 		[]string{key}, //auto recognized as a key
-		b.cap,         //from her its argv1 to argv4
-		b.rate,
+		b.Cap,         //from her its argv1 to argv4
+		b.Rate,
 		now,
 		1,
 	).Int()
