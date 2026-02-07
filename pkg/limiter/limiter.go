@@ -26,12 +26,12 @@ type RedisBucket struct {
 }
 
 //go:embed script.lua
-var luascript string
+var Luascript string
 
 func CreateRedisBucket(rdb *redis.Client, cap, rate float64) *RedisBucket {
 	return &RedisBucket{
 		Rdb:    rdb,
-		Script: redis.NewScript(luascript),
+		Script: redis.NewScript(Luascript),
 		Cap:    cap,
 		Rate:   rate,
 	}
