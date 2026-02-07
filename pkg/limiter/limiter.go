@@ -1,9 +1,12 @@
 package limiter
 
 import (
+	"context"
 	"math"
 	"sync"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 type Bucket struct {
@@ -21,6 +24,21 @@ func CreateBucket(capacity float64, refill_rate float64) *Bucket {
 		refill_rate:      refill_rate,
 		last_refill_time: time.Now(),
 	}
+}
+
+func RDConn() (*redis.Client, error) {
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379",
+		Password: "",
+		DB:       0,
+		Protocol: 2,
+	})
+
+	ctx := context.Background()
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		return nil, err
+	}
+	return rdb, nil
 }
 
 func (b *Bucket) ReqLimiter() bool {
