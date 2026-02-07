@@ -2,64 +2,52 @@ package limiter
 
 import (
 	"context"
-	"math"
-	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
-type Bucket struct {
-	capacity         float64    //max tokens
-	refill_rate      float64    //tokens refilled per second
-	tokens           float64    //current amount of tokens
-	last_refill_time time.Time  //last time token was added
-	m                sync.Mutex //avoid race conditions
+type RedisBucket struct {
+	rdb *redis.Client
+	//redis executes scripts atomically
+	//meaning all of the stuff inside the script happens at onec without interruption
+	//this is imp as prev while using in memory token bucket, we used mutex to avoid race condtisons
+	//here using a lua scrip to read tokens, read last refil, calc refil, max capacity, sub tokens etc is done in one operation
+	//as no interuption->no race cond
+	//when is the scirpt executed tho?->when called->each request
+	//basicallt replacemnet for mutex
+	script *redis.Script
+	//max cap
+	cap float64
+	//refil rate
+	rate float64
 }
 
-func CreateBucket(capacity float64, refill_rate float64) *Bucket {
-	return &Bucket{
-		capacity:         capacity,
-		tokens:           capacity, //tho we start with the max capacity, burst prob of sliding window is avoided due to the refil rate
-		refill_rate:      refill_rate,
-		last_refill_time: time.Now(),
+func CreateRedisBucket(rdb *redis.Client, cap, rate float64) *RedisBucket {
+	return &RedisBucket{
+		rdb:    rdb,
+		script: redis.NewScript("script.lua"),
+		cap:    cap,
+		rate:   rate,
 	}
 }
 
-func RDConn() (*redis.Client, error) {
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
-		DB:       0,
-		Protocol: 2,
-	})
-
-	ctx := context.Background()
-	if err := rdb.Ping(ctx).Err(); err != nil {
-		return nil, err
+func (b *RedisBucket) ReqLimiter(ctx context.Context, key string) (bool, error) {
+	now := time.Now().Unix()
+	//this takes (context.Context, clinet cmder, keys []string, args ..interface{})
+	//ctx is the controller, client(rdb here) is smth that can send a comand to redis and return the result
+	//rdb inside the run just tells which rdb connection to use, access to fommadns like (HMGET)
+	res, err := b.script.Run(
+		ctx,           //bascially a cancellation and timeout controler
+		b.rdb,         //which rdb to execute this on
+		[]string{key}, //auto recognized as a key
+		b.cap,         //from her its argv1 to argv4
+		b.rate,
+		now,
+		1,
+	).Int()
+	if err != nil {
+		return false, err
 	}
-	return rdb, nil
-}
-
-func (b *Bucket) ReqLimiter() bool {
-	//inevitably when used in projects that deal with http req/res
-	//go will use go routines; hence race conditon is a risk
-	b.m.Lock()         //no other goroutines can access while another is accceing the bucket
-	defer b.m.Unlock() //unlock onece the access is done
-
-	now := time.Now()
-	ts_last_refill := now.Sub(b.last_refill_time).Seconds()
-	//refill
-	b.tokens = math.Min(
-		//cant exceed max capacity
-		b.capacity,
-		b.tokens+(ts_last_refill*b.refill_rate),
-	)
-	b.last_refill_time = time.Now()
-	//if theres at least one token we allow the request
-	if b.tokens >= 1 {
-		b.tokens -= 1
-		return true
-	}
-	return false
+	return res == 1, nil
 }
