@@ -38,4 +38,4 @@ redis.call("HMSET", KEYS[1], "tokens", tokens, "last", now)
 --if 100 max cap, and 5 seconds per refil, then life of a token = 100/5 = 20 seconds
 redis.call("EXPIRE", KEYS[1], math.ceil(capacity/refillRate))
 
-return allowed
+return {allowed, tokens}

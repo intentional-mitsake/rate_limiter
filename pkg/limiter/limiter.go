@@ -37,7 +37,7 @@ func CreateRedisBucket(rdb *redis.Client, cap, rate float64) *RedisBucket {
 	}
 }
 
-func (b *RedisBucket) ReqLimiter(ctx context.Context, key string) (bool, error) {
+func (b *RedisBucket) ReqLimiter(ctx context.Context, key string) (bool, float64, error) {
 	now := time.Now().Unix()
 	//this takes (context.Context, clinet cmder, keys []string, args ..interface{})
 	//ctx is the controller, client(rdb here) is smth that can send a comand to redis and return the result
@@ -52,9 +52,12 @@ func (b *RedisBucket) ReqLimiter(ctx context.Context, key string) (bool, error) 
 		b.Rate,
 		now,
 		1,
-	).Int()
+	).Result()
+	vals := res.([]interface{})
 	if err != nil {
-		return false, err
+		return false, 0, err
 	}
-	return res == 1, nil
+	allowed := vals[0].(int64) //1 or 0
+	tokensLeft := float64(vals[1].(int64))
+	return allowed == 1, tokensLeft, nil
 }
